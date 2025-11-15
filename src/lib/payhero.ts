@@ -1,8 +1,8 @@
 export type PayHeroInitiateOptions = {
   amount: number;
   phone_number: string;
-  provider?: string; // 'm-pesa' or 'sasapay'
-  channel_id?: number;
+  channel_id: number;
+  provider: string; // 'm-pesa' or 'sasapay'
   external_reference?: string;
   customer_name?: string;
   callback_url?: string;

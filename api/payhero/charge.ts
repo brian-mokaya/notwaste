@@ -18,18 +18,26 @@ export default async function handler(req: Request): Promise<Response> {
       return {};
     }) as any;
 
-    const { amount, phone_number } = body || {};
-    if (!amount || !phone_number) {
-      console.error('Validation failed. Missing fields:', { amount: !!amount, phone_number: !!phone_number });
-      return json({ error: 'Missing required fields: amount, phone_number' }, 400);
+    const { amount, phone_number, channel_id, provider } = body || {};
+    if (!amount || !phone_number || !channel_id || !provider) {
+      console.error('Validation failed. Missing fields:', { amount: !!amount, phone_number: !!phone_number, channel_id: !!channel_id, provider: !!provider });
+      return json({ error: 'Missing required fields: amount, phone_number, channel_id, provider' }, 400);
     }
 
     const payheroUrl = 'https://backend.payhero.co.ke/api/v2/payments';
     const basicAuth = (process.env.PAYHERO_BASIC_AUTH || process.env.PAYHERO_BASIC_TOKEN) as string | undefined;
+    const defaultChannelId = process.env.PAYHERO_CHANNEL_ID;
 
     if (!basicAuth) {
       console.error('Missing PAYHERO_BASIC_AUTH in environment');
       return json({ error: 'Server misconfiguration: PAYHERO_BASIC_AUTH is not set' }, 500);
+    }
+
+    // Use provided channel_id or fall back to env default
+    const finalChannelId = channel_id || (defaultChannelId ? parseInt(defaultChannelId) : undefined);
+    if (!finalChannelId) {
+      console.error('No channel_id provided and PAYHERO_CHANNEL_ID not set');
+      return json({ error: 'Server misconfiguration: PAYHERO_CHANNEL_ID is not configured' }, 500);
     }
 
     const response = await fetch(payheroUrl, {
@@ -38,7 +46,10 @@ export default async function handler(req: Request): Promise<Response> {
         'Content-Type': 'application/json',
         Authorization: `Basic ${basicAuth}`,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        ...body,
+        channel_id: finalChannelId,
+      }),
     });
 
     const text = await response.text().catch(() => '');

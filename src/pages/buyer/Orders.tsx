@@ -1,40 +1,80 @@
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Calendar, Clock, MapPin, Package, DollarSign } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Separator } from '@/components/ui/separator';
 
 export const Orders = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    const fetchOrders = async () => {
-      setLoading(true);
-      try {
-        const querySnapshot = await getDocs(collection(db, 'orders'));
-        const ordersData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setOrders(ordersData);
-      } catch (error) {
-        setOrders([]);
-      }
+    if (!user) {
       setLoading(false);
-    };
-    fetchOrders();
-  }, []);
+      return;
+    }
+
+    // Real-time listener for user's orders
+    const ordersQuery = query(
+      collection(db, 'orders'),
+      where('userId', '==', user.id),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(
+      ordersQuery,
+      (snapshot) => {
+        const ordersData = snapshot.docs.map(doc => ({ 
+          id: doc.id, 
+          ...doc.data() 
+        }));
+        setOrders(ordersData);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Error fetching orders:', error);
+        setOrders([]);
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
+      case 'pending':
+        return 'bg-yellow-500 text-white';
       case 'confirmed':
-        return 'bg-accent text-accent-foreground';
+        return 'bg-green-500 text-white';
       case 'ready':
-        return 'bg-success text-success-foreground';
+        return 'bg-blue-500 text-white';
       case 'completed':
-        return 'bg-secondary text-secondary-foreground';
+        return 'bg-gray-500 text-white';
+      case 'cancelled':
+        return 'bg-red-500 text-white';
       default:
         return 'bg-muted text-muted-foreground';
+    }
+  };
+
+  const getPaymentStatusBadge = (paymentStatus: string) => {
+    switch (paymentStatus) {
+      case 'completed':
+        return <Badge className="bg-green-500 text-white">Paid</Badge>;
+      case 'pending':
+        return <Badge className="bg-yellow-500 text-white">Pending</Badge>;
+      case 'failed':
+        return <Badge className="bg-red-500 text-white">Failed</Badge>;
+      default:
+        return <Badge variant="outline">{paymentStatus}</Badge>;
     }
   };
 
@@ -100,44 +140,87 @@ export const Orders = () => {
                 <div key={order.id} className="border border-border rounded-lg p-4">
                   <div className="flex items-start justify-between mb-3">
                     <div>
-                      <h4 className="font-semibold text-lg">{order.title}</h4>
-                      <p className="text-muted-foreground">{order.businessName}</p>
+                      <h4 className="font-semibold text-lg">
+                        Order #{order.paymentReference || order.id.slice(0, 8)}
+                      </h4>
+                      <p className="text-sm text-muted-foreground">
+                        {order.items?.length || 0} item(s)
+                      </p>
                     </div>
-                    <Badge className={getStatusColor(order.status)}>
-                      {order.status}
-                    </Badge>
+                    <div className="flex gap-2 flex-wrap justify-end">
+                      <Badge className={getStatusColor(order.status)}>
+                        {order.status}
+                      </Badge>
+                      {getPaymentStatusBadge(order.paymentStatus)}
+                    </div>
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                    <div className="flex items-center gap-2">
-                      <Package className="h-4 w-4 text-muted-foreground" />
-                      <span>{order.quantity} portions</span>
-                    </div>
+                  {/* Order Items */}
+                  <div className="space-y-2 mb-3">
+                    {order.items?.map((item: any, index: number) => (
+                      <div key={index} className="flex justify-between text-sm">
+                        <span>{item.quantity}x {item.title}</span>
+                        <span className="text-muted-foreground">KSh {(item.price * item.quantity).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <Separator className="my-3" />
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                     <div className="flex items-center gap-2">
                       <DollarSign className="h-4 w-4 text-muted-foreground" />
-                      <span>KSh {order.totalAmount.toLocaleString()}</span>
+                      <span className="font-semibold">Total: KSh {order.totalAmount?.toLocaleString() || 0}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Calendar className="h-4 w-4 text-muted-foreground" />
-                      <span>Ordered: {new Date(order.orderDate).toLocaleDateString()}</span>
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 text-sm">
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-muted-foreground" />
-                      <span>Pickup: {new Date(order.pickupTime).toLocaleString()}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <MapPin className="h-4 w-4 text-muted-foreground" />
-                      <span>{order.location}</span>
+                      <span>{new Date(order.orderDate || order.createdAt).toLocaleDateString()}</span>
                     </div>
                   </div>
 
-                  {order.status === 'ready' && (
-                    <div className="mt-4">
-                      <Button size="sm">
-                        View Pickup Details
+                  {order.mpesaReceiptNumber && (
+                    <div className="mt-3 p-2 bg-muted rounded text-sm">
+                      <span className="font-medium">M-PESA Receipt: </span>
+                      <span className="text-muted-foreground">{order.mpesaReceiptNumber}</span>
+                    </div>
+                  )}
+
+                  {/* Payment Status Messages */}
+                  {order.paymentStatus === 'pending' && (
+                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4" />
+                        <span className="font-medium">⏳ Awaiting Payment</span>
+                      </div>
+                      <p className="mt-1 text-xs">Please complete the M-PESA prompt on your phone.</p>
+                    </div>
+                  )}
+
+                  {order.paymentStatus === 'completed' && (
+                    <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded text-sm text-green-800">
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="h-4 w-4" />
+                        <span className="font-medium">✅ Payment Completed</span>
+                      </div>
+                      <p className="mt-1 text-xs">
+                        Your payment has been successfully received! 
+                        {order.status === 'confirmed' && ' Your order is being prepared.'}
+                        {order.status === 'ready' && ' Your order is ready for pickup!'}
+                        {order.status === 'completed' && ' This order has been completed.'}
+                      </p>
+                    </div>
+                  )}
+
+                  {order.paymentStatus === 'failed' && (
+                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-800">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">❌ Payment Failed</span>
+                      </div>
+                      <p className="mt-1 text-xs">
+                        {order.paymentError || 'The payment was not completed. Please try again.'}
+                      </p>
+                      <Button size="sm" variant="destructive" className="mt-2">
+                        Retry Payment
                       </Button>
                     </div>
                   )}
@@ -147,7 +230,7 @@ export const Orders = () => {
           </CardContent>
         </Card>
 
-        {orders.length === 0 && (
+        {!loading && orders.length === 0 && (
           <Card className="p-12 text-center">
             <CardContent>
               <div className="text-6xl mb-4">📦</div>
@@ -155,7 +238,16 @@ export const Orders = () => {
               <CardDescription className="mb-4">
                 Start browsing surplus food to place your first order.
               </CardDescription>
-              <Button>Browse Food</Button>
+              <Button onClick={() => navigate('/browse')}>Browse Food</Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {loading && (
+          <Card className="p-12 text-center">
+            <CardContent>
+              <div className="text-4xl mb-4">⏳</div>
+              <CardDescription>Loading your orders...</CardDescription>
             </CardContent>
           </Card>
         )}

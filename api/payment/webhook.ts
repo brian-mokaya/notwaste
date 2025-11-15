@@ -1,5 +1,7 @@
-// Vercel Serverless Function: IntaSend Webhook Receiver
-// Verify with optional secret if provided. IntaSend typically signs payloads; adapt as needed.
+// Vercel Serverless Function: PayHero Webhook Receiver
+// Receives payment callbacks from PayHero
+
+import { updateOrderByReference } from '../lib/firebase-admin';
 
 export const config = { runtime: 'edge' };
 
@@ -16,11 +18,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   try {
     const text = await req.text();
-
-    // Optionally verify signature here if IntaSend provides one
-    // const sig = req.headers.get('x-intasend-signature');
-    // const secret = process.env.INTASEND_WEBHOOK_SECRET;
-    // TODO: implement HMAC verification if required
+    console.log('PayHero webhook received:', text);
 
     let payload: any;
     try {
@@ -29,11 +27,90 @@ export default async function handler(req: Request): Promise<Response> {
       return json({ error: 'Invalid JSON' }, 400);
     }
 
-    // TODO: Update your database with payload details
-    // console.log('Webhook payload:', payload);
+    // PayHero callback format:
+    // {
+    //   "forward_url": "",
+    //   "response": {
+    //     "Amount": 10,
+    //     "CheckoutRequestID": "ws_CO_14012024103543427709099876",
+    //     "ExternalReference": "INV-009",
+    //     "MerchantRequestID": "3202-70921557-1",
+    //     "MpesaReceiptNumber": "SAE3YULR0Y",
+    //     "Phone": "+254709099876",
+    //     "ResultCode": 0,
+    //     "ResultDesc": "The service request is processed successfully.",
+    //     "Status": "Success"
+    //   },
+    //   "status": true
+    // }
+
+    const { response, status } = payload;
+    
+    if (status && response) {
+      const {
+        Amount,
+        CheckoutRequestID,
+        ExternalReference,
+        MpesaReceiptNumber,
+        Phone,
+        ResultCode,
+        ResultDesc,
+        Status
+      } = response;
+
+      console.log('Payment callback:', {
+        amount: Amount,
+        reference: ExternalReference,
+        mpesaReceipt: MpesaReceiptNumber,
+        phone: Phone,
+        resultCode: ResultCode,
+        status: Status,
+      });
+
+      // Update Firestore database with payment status
+      // When ResultCode === 0, payment is COMPLETED successfully
+      
+      if (ResultCode === 0 && Status === 'Success') {
+        // ✅ PAYMENT COMPLETED - Update order to "completed" status
+        console.log(`✅ Payment COMPLETED for order ${ExternalReference}: ${MpesaReceiptNumber}`);
+        
+        // Update order in Firestore
+        const updated = await updateOrderByReference(ExternalReference, {
+          paymentStatus: 'completed',
+          status: 'confirmed',
+          mpesaReceiptNumber: MpesaReceiptNumber,
+          mpesaCheckoutRequestID: CheckoutRequestID,
+          paymentCompletedAt: new Date().toISOString(),
+        });
+        
+        if (updated) {
+          console.log('✅ Order status updated to COMPLETED in Firestore');
+        } else {
+          console.warn('⚠️ Failed to update order in Firestore. Order will remain pending.');
+        }
+        
+      } else {
+        // ❌ Payment failed
+        console.log(`❌ Payment FAILED for order ${ExternalReference}: ${ResultDesc}`);
+        
+        // Update order with failed status
+        const updated = await updateOrderByReference(ExternalReference, {
+          paymentStatus: 'failed',
+          status: 'cancelled',
+          paymentError: ResultDesc,
+        });
+        
+        if (updated) {
+          console.log('✅ Order status updated to FAILED in Firestore');
+        } else {
+          console.warn('⚠️ Failed to update order failure in Firestore');
+        }
+      }
+    }
 
     return json({ received: true }, 200);
   } catch (error: any) {
+    console.error('Webhook error:', error);
     return json({ error: error?.message || 'Internal Server Error' }, 500);
   }
 }
