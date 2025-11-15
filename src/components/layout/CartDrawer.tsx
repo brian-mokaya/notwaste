@@ -7,7 +7,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTr
 import { Separator } from '@/components/ui/separator';
 import { ShoppingCart, Plus, Minus, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { IntaSendPayment } from '@/lib/intasend';
+import { PayHeroPayment } from '@/lib/payhero';
 
 export const CartDrawer = () => {
   const { cart, updateQuantity, removeFromCart, clearCart, getItemCount } = useCart();
@@ -37,19 +37,21 @@ export const CartDrawer = () => {
 
     setIsProcessing(true);
     try {
-      const payment = new IntaSendPayment();
+      const payment = new PayHeroPayment();
       const result = await payment.initiatePayment({
-        amount: cart.total,
-        currency: 'KES',
-        email: user.email,
-        phone: user.phone,
-        items: cart.items,
-        userId: user.id
+        amount: Math.round(cart.total),
+        phone_number: user.phone,
+        provider: 'm-pesa',
+        external_reference: `ORDER-${Date.now()}`,
+        customer_name: user.name || user.email,
       });
 
       if (result.success) {
-        // Redirect to IntaSend payment page
-        window.location.href = result.payment_url;
+        // MPESA STK Push is queued; inform the user to check their phone.
+        toast({
+          title: 'Payment started',
+          description: `Payment queued. Reference: ${result.reference || result.CheckoutRequestID || ''}`,
+        });
       } else {
         throw new Error(result.error || 'Payment initiation failed');
       }
