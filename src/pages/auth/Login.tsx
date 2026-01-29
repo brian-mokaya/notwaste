@@ -29,10 +29,18 @@ export const Login = () => {
       
       // Redirect based on role - will be handled by the AuthProvider effect
       navigate('/');
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error?.code === 'auth/user-not-found' || error?.code === 'auth/wrong-password'
+        ? 'Invalid email or password.'
+        : error?.code === 'auth/invalid-email'
+        ? 'Please enter a valid email address.'
+        : error?.code === 'auth/too-many-requests'
+        ? 'Too many failed attempts. Please try again later.'
+        : 'Login failed. Please try again.';
+      
       toast({
         title: "Login Failed",
-        description: "Invalid email or password.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {

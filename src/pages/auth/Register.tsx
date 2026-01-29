@@ -37,10 +37,18 @@ export const Register = () => {
         description: "Welcome to WasteNot. Start reducing food waste today!",
       });
       navigate('/');
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error?.code === 'auth/email-already-in-use'
+        ? 'This email is already registered. Please login instead.'
+        : error?.code === 'auth/weak-password'
+        ? 'Password should be at least 6 characters long.'
+        : error?.code === 'auth/invalid-email'
+        ? 'Please enter a valid email address.'
+        : 'Registration failed. Please try again.';
+      
       toast({
         title: "Registration Failed",
-        description: "Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
